@@ -17,7 +17,7 @@ class LogEntry {
     return LogEntry(
       timestamp: json['timestamp'] ?? '',
       url: json['url'] ?? '',
-      details: json['phishing_percentage'] > json['safe_percentage'] ? "Tautan Berbahaya" : "Tautan Aman",
+      details: json['phishing_percentage'] > json['safe_percentage'] ? "Dangerous Link" : "Safe Link",
       phishingPercentage: json['phishing_percentage'] ?? 0.0,
       safePercentage: json['safe_percentage'] ?? 0.0,
     );
