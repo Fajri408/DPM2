@@ -20,6 +20,9 @@ class ApiService {
   }
 
   static Future<PredictResponse> checkUrl(String url) async {
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      url = 'https://'+url;
+    }
     final response = await http.post(
       Uri.parse('$baseUrl/predict'),
       headers: {"Content-Type": "application/json"},

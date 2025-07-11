@@ -14,6 +14,7 @@ import 'package:seclick/services/local_notification_service.dart';
 import 'package:seclick/services/local_storage_service.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
 
@@ -199,20 +200,28 @@ class _HomePageState extends State<HomePage> {
       return;
     }
 
+    // Normalisasi URL di field input
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      url = 'https://' + url;
+      _urlController.text = url;
+    }
+
     setState(() {
       _isLoading = true;
       _result = "";
     });
 
     try {
-      // final localApiService = LocalApiService();
-      // PredictResponse response = await localApiService.checkUrl(url);
-      PredictResponse response = await ApiService.checkUrl(url);
+      // Nembak API lagi untuk analisis URL
+      final predictionResponse = await ApiService.checkUrl(url);
+
       setState(() {
-        _result = "Analysis Result:\n Probability Non-Phising: ${(response.safePercentage).toStringAsFixed(1)}% \n Probability Phising: ${(response.phishingPercentage).toStringAsFixed(1)}%";
-        _lastAnalyzedUrl = url; // Store the analyzed URL
-        _phishingPercentage = response.phishingPercentage;
-        _safePercentage = response.safePercentage;
+        _result = "Analysis Result:\n Probability Non-Phising: " +
+            (predictionResponse.safePercentage?.toStringAsFixed(1) ?? '0.0') + "% \n Probability Phising: " +
+            (predictionResponse.phishingPercentage?.toStringAsFixed(1) ?? '0.0') + "%";
+        _lastAnalyzedUrl = url;
+        _phishingPercentage = predictionResponse.phishingPercentage ?? 0.0;
+        _safePercentage = predictionResponse.safePercentage ?? 0.0;
       });
 
       // Save prediction to local storage
@@ -220,8 +229,8 @@ class _HomePageState extends State<HomePage> {
         timestamp: _analysisTimestamp,
         url: url,
         details: "URL analyzed for phishing",
-        phishingPercentage: response.phishingPercentage,
-        safePercentage: response.safePercentage,
+        phishingPercentage: predictionResponse.phishingPercentage ?? 0.0,
+        safePercentage: predictionResponse.safePercentage ?? 0.0,
       );
       await LocalStorageService().savePrediction(entry);
     } catch (e) {
@@ -235,100 +244,101 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-Future<void> _openUrlInBrowser(String url) async {
-  setState(() {
-    _isOpeningUrl = true;
-  });
-
-  try {
-    // Cek apakah URL terakhir yang dianalisis merupakan phishing
-    if (_lastAnalyzedUrl == url && _phishingPercentage > _safePercentage) {
-      bool? shouldProceed = await showDialog<bool>(
-        context: context,
-        builder: (BuildContext context) {
-          return AlertDialog(
-            title: const Row(
-              children: [
-                Icon(Icons.warning, color: Colors.red),
-                SizedBox(width: 8),
-                Text('Warning!', style: TextStyle(color: Colors.red)),
+  Future<void> _openUrlInBrowser(String url) async {
+    setState(() {
+      _isOpeningUrl = true;
+    });
+    
+    try {
+      // Check if this URL was recently analyzed and found to be phishing
+      if (_lastAnalyzedUrl == url && _phishingPercentage > _safePercentage) {
+        // Show warning dialog for phishing URLs
+        bool? shouldProceed = await showDialog<bool>(
+          context: context,
+          builder: (BuildContext context) {
+            return AlertDialog(
+              title: const Row(
+                children: [
+                  Icon(Icons.warning, color: Colors.red),
+                  SizedBox(width: 8),
+                  Text('Warning!', style: TextStyle(color: Colors.red)),
+                ],
+              ),
+              content: const Text(
+                'This URL was detected as potentially phishing. Are you sure you want to open it?',
+                style: TextStyle(fontFamily: 'Lato'),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(false),
+                  child: const Text(
+                    'Cancel',
+                    style: TextStyle(color: Colors.grey),
+                  ),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(true),
+                  child: const Text(
+                    'Open Anyway',
+                    style: TextStyle(color: Colors.red),
+                  ),
+                ),
               ],
-            ),
-            content: const Text(
-              'This URL was detected as potentially phishing. Are you sure you want to open it?',
-              style: TextStyle(fontFamily: 'Lato'),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(false),
-                child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
-              ),
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(true),
-                child: const Text('Open Anyway', style: TextStyle(color: Colors.red)),
-              ),
-            ],
-          );
-        },
-      );
-
-      if (shouldProceed != true) {
-        setState(() {
-          _isOpeningUrl = false;
-        });
-        return;
-      }
-    }
-
-    // Tetap gunakan URL sesuai input user
-    String urlToOpen = url.trim();
-
-    // Tambahkan protokol hanya jika tidak ada
-    if (!urlToOpen.startsWith('http://') && !urlToOpen.startsWith('https://')) {
-      urlToOpen = 'https://$urlToOpen';
-    }
-
-    debugPrint("Original input: $url");
-    debugPrint("URL to open after protocol check: $urlToOpen");
-
-    final Uri uri = Uri.parse(urlToOpen);
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Opening $urlToOpen in browser...'),
-            backgroundColor: Colors.blue,
-            duration: const Duration(seconds: 2),
-          ),
+            );
+          },
         );
+        
+        if (shouldProceed != true) {
+          setState(() {
+            _isOpeningUrl = false;
+          });
+          return; // User cancelled
+        }
       }
-    } else {
+      
+      // Ensure URL has protocol
+      String urlToOpen = url;
+      if (!url.startsWith('http://') && !url.startsWith('https://')) {
+        urlToOpen = 'https://$url';
+      }
+      
+      final Uri uri = Uri.parse(urlToOpen);
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Opening $urlToOpen in browser...'),
+              backgroundColor: Colors.blue,
+              duration: const Duration(seconds: 2),
+            ),
+          );
+        }
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Could not open $urlToOpen'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Could not open $urlToOpen'),
+            content: Text('Error opening URL: $e'),
             backgroundColor: Colors.red,
           ),
         );
       }
+    } finally {
+      setState(() {
+        _isOpeningUrl = false;
+      });
     }
-  } catch (e) {
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error opening URL: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    }
-  } finally {
-    setState(() {
-      _isOpeningUrl = false;
-    });
   }
-}
-
 
   Future<void> _copyUrlToClipboard(String url) async {
     try {
